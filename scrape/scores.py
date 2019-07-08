@@ -1,16 +1,17 @@
-import os
-import psycopg2
-from psycopg2 import sql
-from psycopg2 import extras
-import praw
-from prawcore import exceptions
 import datetime
+import os
 from time import sleep
+
+import praw
+import psycopg2
+from prawcore import exceptions
+from psycopg2 import extras
+from psycopg2 import sql
 
 # update when an item is more than 24 hours old
 UPDATE_TIME = 86400
 # update this many more seconds past the UPDATE_TIME
-UPDATE_BUFFER = 1200
+UPDATE_BUFFER = 240
 
 
 def connect():
@@ -97,7 +98,7 @@ def update_items(db, table, reddit):
         psycopg2.extras.execute_batch(cur, query, deleted)
         db.commit()
 
-    query = sql.SQL("UPDATE {} SET score=%s, retrieved_on=%s, update_age=%s - created_utc WHERE id=%s")\
+    query = sql.SQL("UPDATE {} SET score=%s, retrieved_on=%s, update_age=%s - created_utc WHERE id=%s") \
         .format(sql.Identifier(table))
     cur = db.cursor()
     psycopg2.extras.execute_batch(cur, query, updated)

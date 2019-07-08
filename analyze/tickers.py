@@ -1,11 +1,12 @@
-import requests
-from datetime import datetime
-import os.path
 import csv
-import psycopg2
-from psycopg2 import sql
-from psycopg2 import extras
+import os.path
 import re
+from datetime import datetime
+
+import psycopg2
+import requests
+from psycopg2 import extras
+from psycopg2 import sql
 
 MARKETS = ['nasdaq', 'nyse', 'amex']
 TOO_MANY_LABELS = 5
@@ -248,7 +249,7 @@ def unprocessed_content(db, table):
     -------
     bool
         True if at least one item is unprocessed in the table
-        
+
     """
     query = sql.SQL("SELECT id FROM {}"
                     " WHERE processed = false"
@@ -275,4 +276,3 @@ def label_tickers():
         content_ids = [(id,) for id in content_labels.keys()]
         ticker_labels = invert_labels(COMMENT_PREFIX, content_labels)
         write_ticker_labels(db, 'comments', ticker_labels, content_ids)
-
