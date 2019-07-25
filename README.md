@@ -1,4 +1,4 @@
-# reddit-stocks
+# red-stocks
 
 Gets, stores, and analyzes comments and posts submitted to various investing subreddits.
 

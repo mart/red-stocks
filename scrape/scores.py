@@ -1,157 +1,26 @@
-import datetime
-import os
+from datetime import datetime
 from time import sleep
 
-import praw
-import psycopg2
 from prawcore import exceptions
-from psycopg2 import extras
-from psycopg2 import sql
 
-# update when an item is more than 24 hours old
-UPDATE_TIME = 86400
-# update this many more seconds past the UPDATE_TIME
-UPDATE_BUFFER = 240
+from db.models import Session
+
+MAX_BATCH = 10000
 
 
-def connect():
-    """Connect to database
+def update_content(table, updated, deleted):
+    """Updates database with new scores if not deleted, marks all given content as updated
 
     """
-    return psycopg2.connect(os.environ['DATABASE_URL'], sslmode='require')
+    session = Session()
+    deleted_batch = [{'id': item[0], 'retrieved_on': item[1], 'update_age': item[1], 'deleted': True}
+                     for item in deleted]
+    updated_batch = [{'id': item[0], 'retrieved_on': item[1], 'update_age': (item[1] - item[2]), 'score': item[3]}
+                     for item in updated]
 
-
-def now():
-    """The current time
-
-    Returns
-    -------
-    int
-        The current time in UNIX timestamp format
-
-    """
-    return int(datetime.datetime.today().timestamp())
-
-
-def start_reddit():
-    """Initializes the PRAW object
-
-    Returns
-    -------
-    Reddit
-        A reddit object connected using the reddit API
-
-    """
-    return praw.Reddit(client_id=os.environ['SCRIPT_ID'],
-                       client_secret=os.environ['SECRET'],
-                       user_agent=os.environ['APPNAME'],
-                       username=os.environ['USERNAME'],
-                       password=os.environ['PASSWORD'])
-
-
-def should_update(db, table):
-    """Queries the table to find out if last update was not recent
-
-    Returns
-    -------
-    boolean
-        True if at least one item found that needs an update
-
-    """
-    query = sql.SQL("SELECT update_age FROM {}"
-                    " WHERE (created_utc < (select extract(epoch from now()) - %s)"
-                    " AND update_age < %s)"
-                    " LIMIT 1").format(sql.Identifier(table))
-    cur = db.cursor()
-    cur.execute(query, [UPDATE_TIME + UPDATE_BUFFER, UPDATE_TIME])
-    output = cur.fetchone()
-    cur.close()
-    return output is not None
-
-
-def update():
-    """Updates the scores for items that are more than UPDATE_TIME old
-
-    """
-    reddit = start_reddit()
-    db = connect()
-    while should_update(db, "comments"):
-        print("Updating comment batch...")
-        update_items(db, "comments", reddit)
-    while should_update(db, "posts"):
-        print("Updating post batch...")
-        update_items(db, "posts", reddit)
-    db.close()
-
-
-def update_items(db, table, reddit):
-    """Updates a batch of items that are more than UPDATE_TIME old
-
-    """
-    items = read_items(db, table)
-    updated, deleted = scrape_content(items, table, reddit)
-
-    if deleted:
-        query = sql.SQL("UPDATE {} SET retrieved_on=%s, update_age=%s - created_utc, deleted=true "
-                        "WHERE id=%s").format(sql.Identifier(table))
-        cur = db.cursor()
-        psycopg2.extras.execute_batch(cur, query, deleted)
-        db.commit()
-
-    query = sql.SQL("UPDATE {} SET score=%s, retrieved_on=%s, update_age=%s - created_utc WHERE id=%s") \
-        .format(sql.Identifier(table))
-    cur = db.cursor()
-    psycopg2.extras.execute_batch(cur, query, updated)
-    db.commit()
-    cur.close()
-
-
-def read_items(db, table):
-    """Finds a batch of items to update
-
-    Returns
-    -------
-    list
-        A list of reddit item IDs that need score updates
-
-    """
-    query = sql.SQL("SELECT id FROM {}"
-                    " WHERE (created_utc < (select extract(epoch from now()) - %s) AND update_age < %s)"
-                    " LIMIT 2000").format(sql.Identifier(table))
-    cur = db.cursor()
-    cur.execute(query, [UPDATE_TIME, UPDATE_TIME])
-    output = [item[0] for item in cur.fetchall()]
-    cur.close()
-    return output
-
-
-def scrape_content(result_ids, table, reddit):
-    """Finds updated scores and deleted items
-
-    Returns
-    -------
-    list(tuple)
-        A list of tuples with (score, now(), now(), id) representing items that were found
-    list(tuple)
-        A list of tuples with (now(), now(), id) representing items that could not be found
-    """
-    if table == "comments":
-        prefix = "t1_"
-    elif table == "posts":
-        prefix = "t3_"
-    else:
-        raise Exception('table cannot be {}, can only get reddit posts or comments'.format(table))
-
-    scrape_list = [prefix + reddit_id for reddit_id in result_ids]
-    output = praw_scrape(reddit, scrape_list)
-    deleted = []
-
-    if len(output) != len(result_ids):
-        retrieved = now()
-        found_ids = set([item[3] for item in output])
-        deleted = [(retrieved, retrieved, item) for item in result_ids if item not in found_ids]
-
-    return output, deleted
+    session.bulk_update_mappings(table, deleted_batch)
+    session.bulk_update_mappings(table, updated_batch)
+    session.commit()
 
 
 def praw_scrape(reddit, scrape_list):
@@ -160,19 +29,71 @@ def praw_scrape(reddit, scrape_list):
     Returns
     -------
     list(tuple)
-        A list of tuples with (score, now(), now(), id) representing items that were found
+        A list of tuples with (id, timestamp, created_utc, score) representing items that were found
     """
     gen = reddit.info(fullnames=scrape_list)
     try:
         output = []
-        retrieved = now()
+        retrieved = int(datetime.today().timestamp())
         for c in gen:
-            output.append((c.score, retrieved, retrieved, c.id))
+            output.append((c.id, retrieved, c.created_utc, c.score))
     except exceptions.ResponseException as e:
-        print(str(e) + " at " + str(now()))
-        return [("0", "0")]
+        print(str(e) + " at " + str(int(datetime.today().timestamp())))
+        return []
     except exceptions.RequestException as e:
-        print(str(e) + " at " + str(now()))
+        print(str(e) + " at " + str(int(datetime.today().timestamp())))
         sleep(60)
-        return [("0", "0")]
+        return []
     return output
+
+
+def needs_update(session, table, update_frequency, update_buffer):
+    """Queries the table to find out if a score update is needed
+
+    Finds an item that hasn't been updated at least uopdate_time after creation
+     and is older than update_time + update_buffer
+
+    Returns
+    -------
+    boolean
+        True if at least one item found that needs an update
+
+    """
+    update_cutoff = int(datetime.today().timestamp()) - (update_frequency + update_buffer)
+    query = session.query(table.update_age). \
+        filter(table.created_utc < update_cutoff, table.update_age < update_frequency).first()
+    return query is not None
+
+
+def scrape_update(reddit, table, update_frequency, update_buffer):
+    """Finds and gets updates for a batch of items that are more than update_frequency old
+
+    Returns
+    -------
+    tuple(list(tuple), list(tuple))
+        A tuple with:
+        A list of tuples with (id, timestamp, created_utc, score) representing items that were found
+        A list of tuples with (id, timestamp) representing items that could not be found
+    """
+    session = Session()
+    if needs_update(session, table, update_frequency, update_buffer):
+        update_cutoff = int(datetime.today().timestamp()) - update_frequency
+        items = session.query(table). \
+            filter(table.created_utc < update_cutoff, table.update_age < update_frequency).limit(MAX_BATCH)
+
+        if table.__tablename__ == "comments":
+            prefix = "t1_"
+        else:
+            prefix = "t3_"
+
+        scrape_list = [prefix + item.id for item in items]
+        output = praw_scrape(reddit, scrape_list)
+        deleted = []
+
+        if len(output) != len(scrape_list):
+            retrieved_on = int(datetime.today().timestamp())
+            found_ids = set([item[3] for item in output])
+            deleted = [(item, retrieved_on) for item in items if item.id not in found_ids]
+
+        return output, deleted
+    return [], []

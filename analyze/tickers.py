@@ -8,17 +8,13 @@ import requests
 from psycopg2 import extras
 from psycopg2 import sql
 
+from db.models import Ticker, Session
+
 MARKETS = ['nasdaq', 'nyse', 'amex']
 TOO_MANY_LABELS = 5
 POST_PREFIX = 't3_'
 COMMENT_PREFIX = 't1_'
-
-
-def connect():
-    """Connect to database
-
-    """
-    return psycopg2.connect(os.environ['DATABASE_URL'], sslmode='require')
+MAX_BATCH = 20000
 
 
 def download_tickers():
@@ -47,100 +43,27 @@ def download_tickers():
     return tickers
 
 
-def write_tickers(db, tickers):
-    """Adds the given tickers to the tickers database table
-
-    """
-    query = sql.SQL("INSERT INTO tickers VALUES %s")
-    cur = db.cursor()
-    psycopg2.extras.execute_values(cur, query.as_string(cur), tickers)
-    db.commit()
-    cur.close()
-
-
-def read_tickers(db):
-    """Queries stored ticker symbols from the database and returns a set
-
-    Returns
-    -------
-    set(str)
-        A set of all the stock ticker symbols from the database
-
-    """
-    query = sql.SQL("SELECT symbol FROM tickers")
-    cur = db.cursor()
-    cur.execute(query)
-    output = [symbol[0] for symbol in cur.fetchall()]
-    cur.close()
-    return set(output)
-
-
-def add_tickers():
+def update_tickers():
     """Downloads ticker lists and adds new tickers to the database
 
     """
-    db = connect()
-    tickers = download_tickers()
-    new_tickers = []
-    for symbol in set(tickers.keys()).difference(read_tickers(db)):
-        new_tickers.append((symbol, tickers[symbol]))
-    write_tickers(db, new_tickers)
+    session = Session()
+    new_tickers = download_tickers()
+    stored_tickers = set([row.symbol for row in session.query(Ticker.symbol).all()])
+    update = []
+    for symbol in set(new_tickers.keys()).difference(stored_tickers):
+        update.append({'symbol': symbol, 'name': new_tickers[symbol]})
+    session.bulk_update_mappings(Ticker, update)
 
 
-def unlabeled_content(db, table):
-    """Determines whether or not there is content that needs labeling
-
-    Returns
-    -------
-    bool
-        True if at least one content item has not yet been labeled
+def write_content_labels(table, content):
+    """Updates database content with given labels
 
     """
-    query = sql.SQL("SELECT id FROM {}"
-                    " WHERE labels is NULL"
-                    " LIMIT 1").format(sql.Identifier(table))
-    cur = db.cursor()
-    cur.execute(query)
-    output = cur.fetchone()
-    cur.close()
-    return output is not None
-
-
-def read_posts(db):
-    """Queries a batch of unlabeled reddit posts from the database
-
-    Returns
-    -------
-    dict(str: str)
-        A dictionary with ID as keys and text content as values
-
-    """
-    query = sql.SQL("SELECT id, title, selftext FROM posts"
-                    " WHERE labels is NULL"
-                    " LIMIT 10000")
-    cur = db.cursor()
-    cur.execute(query)
-    output = {content[0]: content[1] + " " + content[2] for content in cur.fetchall()}
-    cur.close()
-    return output
-
-
-def read_comments(db):
-    """Queries a batch of unlabeled reddit comments from the database
-
-    Returns
-    -------
-    dict(str: str)
-        A dictionary with ID as keys and text content as values
-    """
-    query = sql.SQL("SELECT id, body FROM comments"
-                    " WHERE labels is NULL"
-                    " LIMIT 10000")
-    cur = db.cursor()
-    cur.execute(query)
-    output = {content[0]: content[1] for content in cur.fetchall()}
-    cur.close()
-    return output
+    session = Session()
+    update = [{'id': id, 'labels': list(labels)} for id, labels in content.items()]
+    session.bulk_update_mappings(table, update)
+    session.commit()
 
 
 def find_tickers(tickers, content):
@@ -162,78 +85,40 @@ def find_tickers(tickers, content):
     return output
 
 
-def write_content_labels(db, table, content):
-    """Add content labels to the database
-
-    """
-    update = [(list(labels), id) for id, labels in content.items()]
-    query = sql.SQL("UPDATE {} SET labels=%s WHERE id=%s").format(sql.Identifier(table))
-    cur = db.cursor()
-    psycopg2.extras.execute_batch(cur, query, update)
-    db.commit()
-    cur.close()
-
-
-def label_content():
-    """Labels reddit content with possible subject ticker symbols, adds to database
-
-    """
-    db = connect()
-    tickers = read_tickers(db)
-    while unlabeled_content(db, 'posts'):
-        posts = find_tickers(tickers, read_posts(db))
-        write_content_labels(db, 'posts', posts)
-    while unlabeled_content(db, 'comments'):
-        comments = find_tickers(tickers, read_comments(db))
-        write_content_labels(db, 'comments', comments)
-
-
-def read_content_labels(db, table):
-    """Queries a batch of unprocessed reddit content from the database
-
-    Returns
-    -------
-    dict(str: str)
-        A dictionary with ID as keys and text content as values
-    """
-    query = sql.SQL("SELECT id, labels FROM {}"
-                    " WHERE processed = false"
-                    " LIMIT 10000").format(sql.Identifier(table))
-    cur = db.cursor()
-    cur.execute(query)
-    output = {content[0]: content[1] for content in cur.fetchall()}
-    cur.close()
-    return output
-
-
-def invert_labels(prefix, labels):
-    """Inverts the ID: list of ticker symbols (convert to ticker symbol: list of IDs)
+def label_content(table):
+    """Labels reddit content with subject ticker symbols
 
     Returns
     -------
     dict(str: list(str))
-        A dictionary with ticker symbols as keys and a list of content ids as values
+        A dictionary with id as keys and a list of associated tickers as values
+
     """
-    output = {}
-    for id, list in labels.items():
-        for label in list:
-            if label in output:
-                output[label].append(prefix + id)
-            else:
-                output[label] = [prefix + id]
-    output.pop('UNKNOWN', None)
-    return output
+    session = Session()
+    tickers = set([row.symbol for row in session.query(Ticker.symbol).all()])
+    if session.query(table.id).filter(table.labels.is_(None)).first() is not None:  # check for unlabeled content
+        if table.__tablename__ == 'posts':
+            query = session.query(table.id, table.title, table.selftext). \
+                filter(table.labels.is_(None)).limit(MAX_BATCH)
+            content = {item.id: item.title + " " + item.selftext for item in query.all()}
+        else:
+            query = session.query(table.id, table.body). \
+                filter(table.labels.is_(None)).limit(MAX_BATCH)
+            content = {item.id: item.body for item in query.all()}
+        return find_tickers(tickers, content)
+    return {}
 
 
-def write_ticker_labels(db, table, ticker_labels, content_ids):
+def write_ticker_labels(table, ticker_labels, content_ids):
     """Adds the assigned labels from a batch of content to the tickers table and marks content as processed
 
     """
+    # TODO use SQLAlchemy
+    db = psycopg2.connect(os.environ['DATABASE_URL'], sslmode='require')
     update = [(list(ids), ticker) for ticker, ids in ticker_labels.items()]
     query = sql.SQL("UPDATE tickers SET content_ids = content_ids || %s WHERE symbol = %s")
     cur = db.cursor()
     psycopg2.extras.execute_batch(cur, query, update)
-    db.commit()
 
     query = sql.SQL("UPDATE {} SET processed=true WHERE id=%s").format(sql.Identifier(table))
     cur = db.cursor()
@@ -242,37 +127,45 @@ def write_ticker_labels(db, table, ticker_labels, content_ids):
     cur.close()
 
 
-def unprocessed_content(db, table):
-    """Determines if there is unprocessed content in the database
+def invert_labels(prefix, labels):
+    """Inverts the ID: list of ticker symbols (convert to ticker symbol: list of IDs)
+        Outputs a list of dictionaries for a SQLAlchemy batch update
 
     Returns
     -------
-    bool
-        True if at least one item is unprocessed in the table
-
+    list(dict(str: list(str)))
+        A list of dictionaries with ticker symbols as keys and a list of content ids as values
     """
-    query = sql.SQL("SELECT id FROM {}"
-                    " WHERE processed = false"
-                    " LIMIT 1").format(sql.Identifier(table))
-    cur = db.cursor()
-    cur.execute(query)
-    output = cur.fetchone()
-    cur.close()
-    return output is not None
+    symbol_map = {}
+    for id, list in labels.items():
+        for ticker in list:
+            if ticker in symbol_map:
+                symbol_map[ticker].append(prefix + id)
+            else:
+                symbol_map[ticker] = [prefix + id]
+    symbol_map.pop('UNKNOWN', None)
+    return [{'symbol': symbol, 'labels': labels} for symbol, labels in symbol_map.items()]
 
 
-def label_tickers():
-    """Labels tickers with a list of associated content ids, adds to database, marks content processed
+def label_tickers(table):
+    """Labels tickers with a list of associated content ids
 
+    Returns
+    -------
+    tuple(list(dict(str: list(str))), list(str))
+        A tuple with:
+        A list of dictionaries with ticker symbols as keys and a list of content ids as values
+        A list of content ids that were processed to generate the other list in the tuple
     """
-    db = connect()
-    while unprocessed_content(db, 'posts'):
-        content_labels = read_content_labels(db, 'posts')
-        content_ids = [(id,) for id in content_labels.keys()]
-        ticker_labels = invert_labels(POST_PREFIX, content_labels)
-        write_ticker_labels(db, 'posts', ticker_labels, content_ids)
-    while unprocessed_content(db, 'comments'):
-        content_labels = read_content_labels(db, 'comments')
-        content_ids = [(id,) for id in content_labels.keys()]
-        ticker_labels = invert_labels(COMMENT_PREFIX, content_labels)
-        write_ticker_labels(db, 'comments', ticker_labels, content_ids)
+    session = Session()
+    if table.__tablename__ == 'posts':
+        prefix = POST_PREFIX
+    else:
+        prefix = COMMENT_PREFIX
+
+    if session.query(table.id).filter(table.processed.is_(False)).first() is not None:
+        query = session.query(table.id, table.labels).filter(table.processed.is_(False)).limit(MAX_BATCH)
+        content_labels = {content[0]: content[1] for content in query.all()}
+        content_ids = [id for id in content_labels.keys()]
+        return invert_labels(prefix, content_labels), content_ids
+    return [], []
