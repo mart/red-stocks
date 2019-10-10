@@ -115,16 +115,17 @@ def write_ticker_labels(table, ticker_labels, content_ids):
     """Adds the assigned labels from a batch of content to the tickers table and marks content as processed
 
     """
-    # TODO use SQLAlchemy
-    db = psycopg2.connect(os.environ['DATABASE_URL'], sslmode='require')
-    update = [(list(ids), ticker) for ticker, ids in ticker_labels.items()]
+    # TODO use SQLAlchemy, refactor to better match many-to-many relation
+    db = psycopg2.connect(os.environ['DATABASE_STRING'])
+    update = [(item['labels'], item['symbol']) for item in ticker_labels]
     query = sql.SQL("UPDATE tickers SET content_ids = content_ids || %s WHERE symbol = %s")
     cur = db.cursor()
     psycopg2.extras.execute_batch(cur, query, update)
 
-    query = sql.SQL("UPDATE {} SET processed=true WHERE id=%s").format(sql.Identifier(table))
+    query = sql.SQL("UPDATE {} SET processed=true WHERE id=%s").format(sql.Identifier(table.__tablename__))
     cur = db.cursor()
-    psycopg2.extras.execute_batch(cur, query, content_ids)
+    processed = [(id,) for id in content_ids]
+    psycopg2.extras.execute_batch(cur, query, processed)
     db.commit()
     cur.close()
 
