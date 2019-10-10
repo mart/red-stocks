@@ -1,9 +1,12 @@
 from psaw import PushshiftAPI
 from sqlalchemy import func
-
+import logging
+import os
 from db.models import Session
 
 MAX_BATCH = 10000
+log = logging.getLogger(__name__)
+logging.basicConfig(level=os.environ['LOG_LEVEL'])
 
 
 def get_items(table, subreddit, latest):
@@ -59,7 +62,6 @@ def scrape_content(subreddits, table, earliest_content):
     for subreddit in subreddits:
         latest_content = latest_item(session, table, subreddit, earliest_content)
         content += get_items(table, subreddit, latest_content)
-        if len(content) > MAX_BATCH:
-            break
-
+        log.info("Scraped " + subreddit + " " + table.__tablename__ + " from " + str(latest_content))
+        last_update = latest_content
     return content

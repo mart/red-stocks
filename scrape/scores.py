@@ -1,11 +1,14 @@
 from datetime import datetime
 from time import sleep
-
+import logging
+import os
 from prawcore import exceptions
 
 from db.models import Session
 
 MAX_BATCH = 10000
+log = logging.getLogger(__name__)
+logging.basicConfig(level=os.environ['LOG_LEVEL'])
 
 
 def update_content(table, updated, deleted):
@@ -38,10 +41,10 @@ def praw_scrape(reddit, scrape_list):
         for c in gen:
             output.append((c.id, retrieved, c.created_utc, c.score))
     except exceptions.ResponseException as e:
-        print(str(e) + " at " + str(int(datetime.today().timestamp())))
+        log.warning(str(e) + " at " + str(int(datetime.today().timestamp())))
         return []
     except exceptions.RequestException as e:
-        print(str(e) + " at " + str(int(datetime.today().timestamp())))
+        log.warning(str(e) + " at " + str(int(datetime.today().timestamp())))
         sleep(60)
         return []
     return output
@@ -95,5 +98,6 @@ def scrape_update(reddit, table, update_frequency, update_buffer):
             found_ids = set([item[3] for item in output])
             deleted = [(item, retrieved_on) for item in items if item.id not in found_ids]
 
+        log.info("Scraped " + table.__tablename__ + " scores to " + str(update_cutoff))
         return output, deleted
     return [], []
