@@ -96,7 +96,7 @@ def scrape_update(reddit, table, update_frequency, update_buffer):
         if len(output) != len(scrape_list):
             retrieved_on = int(datetime.today().timestamp())
             found_ids = set([item[3] for item in output])
-            deleted = [(item, retrieved_on) for item in items if item.id not in found_ids]
+            deleted = [(item.id, retrieved_on) for item in items if item.id not in found_ids]
 
         log.info("Scraped " + table.__tablename__ + " scores to " + str(update_cutoff))
         return output, deleted
