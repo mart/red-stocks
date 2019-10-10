@@ -1,16 +1,16 @@
 import csv
 import os.path
 import re
+from ftplib import FTP
 from datetime import datetime
 
 import psycopg2
-import requests
 from psycopg2 import extras
 from psycopg2 import sql
 
 from db.models import Ticker, Session
 
-MARKETS = ['nasdaq', 'nyse', 'amex']
+MARKETS = ['nasdaq', 'other']
 TOO_MANY_LABELS = 5
 POST_PREFIX = 't3_'
 COMMENT_PREFIX = 't1_'
@@ -26,17 +26,19 @@ def download_tickers():
         A map of stock ticker to company name
 
     """
+    csv.register_dialect("pipe", delimiter='|', quoting=csv.QUOTE_NONE)
     today = datetime.today().strftime('%Y%m%d')
-    if not os.path.exists(today + MARKETS[0] + '.csv'):
+    if not os.path.exists(today + MARKETS[0] + '.text'):
         for market in MARKETS:
-            url = f"https://www.nasdaq.com/screening/companies-by-name.aspx?letter=0&exchange={market}&render=download"
-            response = requests.get(url, allow_redirects=True)
-            with open(today + market + '.csv', 'wb+') as file:
-                file.write(response.content)
+            ftp = FTP("ftp.nasdaqtrader.com")
+            ftp.login("anonymous", "anonymous@anonymous.com")
+            ftp.cwd("/symboldirectory")
+            with open(today + market + '.txt', 'wb') as file:
+                ftp.retrbinary("RETR " + "{}listed.txt".format(market), file.write)
     tickers = {}
     for market in MARKETS:
-        with open(today + market + '.csv', 'r', encoding='utf-8') as file:
-            reader = csv.reader(file, delimiter=',')
+        with open(today + market + '.txt', 'r', encoding='utf-8') as file:
+            reader = csv.reader(file, dialect="pipe")
             next(reader)
             for row in reader:
                 tickers[row[0]] = row[1].replace(",", "")
