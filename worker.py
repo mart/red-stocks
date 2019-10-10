@@ -63,6 +63,7 @@ class Worker:
         self.loop_start = int(datetime.today().timestamp())
         self.reddit = start_reddit(configuration)
         # data
+        self.subreddit_stack = list(self.subreddits)
         self.comments = None
         self.posts = None
         self.comment_scores = None
@@ -74,14 +75,31 @@ class Worker:
         self.post_sentiment = None
         self.comment_sentiment = None
 
-    def scrape_content(self):
-        self.comments = reddit.scrape_content(self.subreddits, Comment, self.earliest_content)
-        self.posts = reddit.scrape_content(self.subreddits, Post, self.earliest_content)
-        return self.comments or self.posts
+    def scrape_comments(self):
+        while not self.comments:
+            if not self.subreddit_stack:  # refill stack, signal worker to go to next step
+                self.subreddit_stack = list(self.subreddits)
+                return False
+            self.comments = reddit.scrape_content(self.subreddit_stack[-1], Comment, self.earliest_content)
+            if not self.comments:
+                self.subreddit_stack.pop()
+        return self.comments
 
-    def content_to_db(self):
+    def comments_to_db(self):
         add_comments(self.comments)
         self.comments = None
+
+    def scrape_posts(self):
+        while not self.posts:
+            if not self.subreddit_stack:  # refill stack, signal worker to go to next step
+                self.subreddit_stack = list(self.subreddits)
+                return False
+            self.posts = reddit.scrape_content(self.subreddit_stack[-1], Post, self.earliest_content)
+            if not self.posts:
+                self.subreddit_stack.pop()
+        return self.posts
+
+    def posts_to_db(self):
         add_posts(self.posts)
         self.posts = None
 
@@ -159,8 +177,11 @@ if __name__ == "__main__":
     log.info("Startup ticker update ")
     tickers.update_tickers()
     while True:
-        while worker.scrape_content():
-            worker.content_to_db()
+        while worker.scrape_posts():
+            worker.posts_to_db()
+
+        while worker.scrape_comments():
+            worker.comments_to_db()
 
         while worker.scrape_scores():
             worker.scores_to_db()

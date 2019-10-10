@@ -48,7 +48,7 @@ def latest_item(session, table, subreddit, earliest_content):
     return latest
 
 
-def scrape_content(subreddits, table, earliest_content):
+def scrape_content(subreddit, table, earliest_content):
     """Scrapes reddit comments via pushshift.io from subreddits
 
     Returns
@@ -58,9 +58,12 @@ def scrape_content(subreddits, table, earliest_content):
     """
     session = Session()
     content = []
+    last_update = -1
 
-    for subreddit in subreddits:
+    while len(content) < MAX_BATCH:
         latest_content = latest_item(session, table, subreddit, earliest_content)
+        if latest_content == last_update:
+            break
         content += get_items(table, subreddit, latest_content)
         log.info("Scraped " + subreddit + " " + table.__tablename__ + " from " + str(latest_content))
         last_update = latest_content
