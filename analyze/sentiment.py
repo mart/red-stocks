@@ -32,14 +32,15 @@ def sentiment(table):
     if session.query(table.id).filter(table.sentiment.is_(None)).first() is not None:  # check for item w/o sentiment
         if table.__tablename__ == 'posts':
             query = session.query(table.id, table.title, table.selftext). \
-                filter(table.labels.is_(None)).limit(MAX_BATCH)
+                filter(table.sentiment.is_(None)).limit(MAX_BATCH)
             content = {item.id: item.title + " " + item.selftext for item in query.all()}
         else:
             query = session.query(table.id, table.body). \
-                filter(table.labels.is_(None)).limit(MAX_BATCH)
+                filter(table.sentiment.is_(None)).limit(MAX_BATCH)
             content = {item.id: item.body for item in query.all()}
 
         output = []
         for id, text in content.items():
             output.append({'id': id, 'sentiment': analyzer.polarity_scores(text)['compound']})
         return output
+    return []
