@@ -15,6 +15,8 @@ TOO_MANY_LABELS = 5
 POST_PREFIX = 't3_'
 COMMENT_PREFIX = 't1_'
 MAX_BATCH = 20000
+# Use this to mark a processed set with no tickers found
+UNKNOWN_TICKER_STRING = 'UNKNOWN'
 
 
 def download_tickers():
@@ -79,11 +81,12 @@ def find_tickers(tickers, content):
     """
     output = {}
     for id, body in content.items():
-        # remove capital letters when used normally e.g. 'The squirrel' -> ' e squirrel', then intersect
-        trimmed = re.sub("\s[A-Z][^A-Z]", " ", re.sub("^[A-Z][^A-Z]", " ", body))
-        output[id] = set(re.findall("[A-Z]+", trimmed)).intersection(tickers)
+        # find strings of capital letters e.g. '$AAPL', 'AAPL' and trim
+        trimmed = [ticker.strip().replace("$", "")
+                   for ticker in re.findall("(?:^|\s)\$?[A-Z]+(?:\s|$)", body)]
+        output[id] = set(trimmed).intersection(tickers)
         if len(output[id]) > TOO_MANY_LABELS or len(output[id]) == 0:
-            output[id] = {'UNKNOWN'}
+            output[id] = {UNKNOWN_TICKER_STRING}
     return output
 
 
@@ -146,7 +149,7 @@ def invert_labels(prefix, labels):
                 symbol_map[ticker].append(prefix + id)
             else:
                 symbol_map[ticker] = [prefix + id]
-    symbol_map.pop('UNKNOWN', None)
+    symbol_map.pop(UNKNOWN_TICKER_STRING, None)
     return [{'symbol': symbol, 'labels': labels} for symbol, labels in symbol_map.items()]
 
 
