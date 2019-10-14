@@ -1,14 +1,13 @@
 import os
 from datetime import datetime
-from time import sleep
+from time import sleep, gmtime, strftime
 import praw
 import logging
 
-from analyze import sentiment
-from analyze import tickers
+from analyze import sentiment, tickers, plot
 from db.models import add_posts, add_comments, Post, Comment
 from scrape import reddit
-from scrape import scores
+from scrape import scores, stockdata
 
 # TODO move to db config table, with row for each config
 config = {'subreddits': ["investing", "RobinHood", "wallstreetbets",
