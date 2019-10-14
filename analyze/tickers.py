@@ -119,6 +119,7 @@ def write_ticker_labels(table, ticker_labels, content_ids):
 
     """
     # TODO use SQLAlchemy, refactor to better match many-to-many relation
+    # https://docs.sqlalchemy.org/en/13/orm/tutorial.html#building-a-many-to-many-relationship
     db = psycopg2.connect(os.environ['DATABASE_STRING'])
     update = [(item['labels'], item['symbol']) for item in ticker_labels]
     query = sql.SQL("UPDATE tickers SET content_ids = content_ids || %s WHERE symbol = %s")

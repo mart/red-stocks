@@ -53,7 +53,7 @@ def praw_scrape(reddit, scrape_list):
 def needs_update(session, table, update_frequency, update_buffer):
     """Queries the table to find out if a score update is needed
 
-    Finds an item that hasn't been updated at least uopdate_time after creation
+    Finds an item that hasn't been updated at least update_time after creation
      and is older than update_time + update_buffer
 
     Returns

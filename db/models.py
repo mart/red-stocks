@@ -1,5 +1,6 @@
 import os
 
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import Column, Integer, String, Boolean, ARRAY, Float
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
@@ -70,6 +71,8 @@ class Ticker(Base):
     symbol = Column(String, primary_key=True)
     name = Column(String)
     content_ids = Column(ARRAY(String))
+    price_data = Column(JSONB)
+    last_update = Column(Integer)
 
 
 def add_posts(posts):
