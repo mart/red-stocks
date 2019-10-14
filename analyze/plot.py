@@ -10,7 +10,6 @@ from time import mktime
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=environ['LOG_LEVEL'])
-pd.options.mode.chained_assignment = None
 
 
 def plot_sentiment(symbol):
@@ -38,7 +37,7 @@ def plot_sentiment(symbol):
     nonzero_content = [item for item in sentiment if item[0] != 0]
     show_labels = False
     if len(nonzero_content) > len(df):  # trim data if plot is crowded
-        df = df[-35:]
+        df = df.iloc[-35:]
         first_time = int(mktime(df["date"][0].timetuple()))
         sentiment = [item for item in nonzero_content if item[1] >= first_time]
         show_labels = True  # show counts because many arrows will overlap
@@ -76,11 +75,11 @@ def annotate(df, sentiment, show_labels):
         if content[0] < 0:
             color = 'r'
             xtext = price_level + arrow_length
-            df['negative_count'][closest_after] += 1
+            df.loc[closest_after, "negative_count"] += 1
         elif content[0] > 0:
             color = 'g'
             xtext = price_level - arrow_length
-            df['positive_count'][closest_after] += 1
+            df.loc[closest_after, "positive_count"] += 1
 
         plt.annotate("",
                      xy=(closest_after, price_level),
