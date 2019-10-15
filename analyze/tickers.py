@@ -17,6 +17,7 @@ COMMENT_PREFIX = 't1_'
 MAX_BATCH = 20000
 # Use this to mark a processed set with no tickers found
 UNKNOWN_TICKER_STRING = 'UNKNOWN'
+IGNORE_SYMBOLS = ['I', 'A']
 
 
 def download_tickers():
@@ -58,6 +59,8 @@ def update_tickers():
     for symbol in set(new_tickers.keys()).difference(stored_tickers):
         update.append({'symbol': symbol, 'name': new_tickers[symbol]})
     session.bulk_update_mappings(Ticker, update)
+    # delete symbols to ignore
+    session.query(Ticker.symbol.in_(IGNORE_SYMBOLS)).delete()
 
 
 def write_content_labels(table, content):
