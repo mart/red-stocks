@@ -39,8 +39,8 @@ def update_stock_data(start_date, tickers=None):
         ticker.price_data = new_data
         ticker.last_update = now
         session.commit()
-    log.info("Skipped " + str(skipped) + "symbols")
-    log.info("Updated " + str((len(tickers)) - skipped) + "symbols")
+    log.info("Skipped " + str(skipped) + " symbols")
+    log.info("Updated " + str((len(tickers)) - skipped) + " symbols")
 
 
 def data_request(params, ticker):
