@@ -4,7 +4,7 @@ attrs==19.2.0
 backtrader==1.9.74.123
 bcolz==0.12.1
 Bottleneck==1.2.1
-certifi==2019.9.11
+certifi==2022.12.7
 chardet==3.0.4
 Click==7.0
 colorama==0.4.1
